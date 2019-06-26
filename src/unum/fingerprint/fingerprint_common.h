@@ -24,6 +24,9 @@
 // DHCP fingerprinting include
 #include "fp_dhcp.h"
 
+// DHCP offer fingerprinting include
+#include "fp_dhcp_offer.h"
+
 // mDNS fingerprinting include
 #include "fp_mdns.h"
 

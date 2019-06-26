@@ -22,6 +22,7 @@ OBJECTS += \
   ./fingerprint/fp_main.o \
   ./fingerprint/fp_ssdp.o \
   ./fingerprint/fp_dhcp.o \
+  ./fingerprint/fp_dhcp_offer.o \
   ./fingerprint/fp_mdns.o
 
 # Add subsystem initializer function

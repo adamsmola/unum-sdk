@@ -34,6 +34,7 @@
 
 // Forward declarations
 static JSON_VAL_TPL_t *tpl_fp_dhcp_array_f(char *key, int idx);
+static JSON_VAL_TPL_t *tpl_fp_dhcp_offer_array_f(char *key, int idx);
 static JSON_VAL_TPL_t *tpl_fp_mdns_array_f(char *key, int idx);
 static JSON_VAL_TPL_t *tpl_fp_ssdp_array_f(char *key, int idx);
 static JSON_VAL_TPL_t *tpl_fp_tbl_stats_array_f(char *key, int ii);
@@ -43,6 +44,7 @@ static JSON_VAL_TPL_t *tpl_fp_tbl_stats_array_f(char *key, int ii);
 static JSON_OBJ_TPL_t tpl_fp_root = {
   { "ssdp",        {.type = JSON_VAL_FARRAY, {.fa = tpl_fp_ssdp_array_f}}},
   { "dhcp",        {.type = JSON_VAL_FARRAY, {.fa = tpl_fp_dhcp_array_f}}},
+  { "dhcp_offer",  {.type = JSON_VAL_FARRAY, {.fa = tpl_fp_dhcp_offer_array_f}}},  
   { "mdns",        {.type = JSON_VAL_FARRAY, {.fa = tpl_fp_mdns_array_f}}},
   { "table_stats", {.type = JSON_VAL_FARRAY, {.fa = tpl_fp_tbl_stats_array_f}}},
   { NULL }
@@ -175,6 +177,81 @@ static JSON_VAL_TPL_t *tpl_fp_dhcp_array_f(char *key, int idx)
     return &tpl_tbl_dhcp_obj_val;
 }
 
+// Dynamically builds JSON template for DHCP fingerprinting info array.
+// Note: the generated jansson objects can refer to string
+//       pointers that can change when the function is called for the next
+//       element of the array.
+static JSON_VAL_TPL_t *tpl_fp_dhcp_offer_array_f(char *key, int idx)
+{
+
+    int ii;
+    // Buffer for the device MAC address string
+    static char mac[MAC_ADDRSTRLEN];
+    // Buffer for the device DHCP options blob
+    static char blob[(FP_MAX_DHCP_OPTIONS << 1) + 1];
+    static char bytes[FP_DHCP_BYTES + 1];
+    // Template for generating DHCP fingerprinting JSON.
+    static JSON_OBJ_TPL_t tpl_tbl_dhcp_offer_obj = {
+      { "mac",  { .type = JSON_VAL_STR, { .s = mac }}},
+      { "bytes",  { .type = JSON_VAL_STR, { .s = bytes }}},
+      { "blob", { .type = JSON_VAL_STR, { .s = blob }}},
+      { NULL }
+    };
+    static JSON_VAL_TPL_t tpl_tbl_dhcp_offer_obj_val = {
+        .type = JSON_VAL_OBJ, { .o = tpl_tbl_dhcp_offer_obj }
+    };
+    static int last_idx = 0; // track last query index
+    static int last_ii = 0;  // array index we stopped at for last_idx
+
+    // If starting over
+    if(idx == 0) {
+        last_idx = last_ii = 0;
+    }
+    // The next query index should be the last +1, otherwise error
+    else if(idx != last_idx + 1) {
+        return NULL;
+    }
+    last_idx = idx;
+
+    // Get the ptr to the devices table
+    FP_DHCP_OFFER_t **pp_dev = fp_get_dhcp_offer_tbl();
+
+    // Continue searching from where we ended last +1
+    for(ii = last_ii + 1; ii < FP_MAX_DEV; ii++) {
+        FP_DHCP_OFFER_t *dev = pp_dev[ii];
+        if(!dev || dev->blob_len == 0) {
+            continue;
+        }
+        snprintf(mac, sizeof(mac), MAC_PRINTF_FMT_TPL,
+                 MAC_PRINTF_ARG_TPL(dev->mac));
+        int jj;
+        char *cptr = blob;
+        for(jj = 0; jj < dev->blob_len && cptr < blob + (sizeof(blob)-1); jj++)
+        {
+            *cptr++ = UTIL_MAKE_HEX_DIGIT(dev->blob[jj] >> 4);
+            *cptr++ = UTIL_MAKE_HEX_DIGIT(dev->blob[jj] & 0xf);
+        }
+        *cptr = 0;
+
+        cptr = bytes;
+        for(jj = 0; jj < FP_DHCP_BYTES; jj++)
+        {
+            *cptr++ = UTIL_MAKE_HEX_DIGIT(dev->bytes[jj] >> 4);
+            *cptr++ = UTIL_MAKE_HEX_DIGIT(dev->bytes[jj] & 0xf);
+        }
+        *cptr = 0;
+
+        break;
+    }
+    last_ii = ii;
+
+    if(ii >= FP_MAX_DEV) {
+        return NULL;
+    }
+
+    return &tpl_tbl_dhcp_offer_obj_val;
+}
+
 // Dynamically builds JSON template for mDNS fingerprinting info array.
 // Note: the generated jansson objects can refer to string
 //       pointers that can change when the function is called for the next
@@ -267,11 +344,13 @@ static JSON_VAL_TPL_t *tpl_fp_tbl_stats_array_f(char *key, int ii)
     };
     static char *name[] = {
         "dhcp",
+        "dhcp_offer",
         "ssdp",
         "mdns"
     };
     static FP_TABLE_STATS_t *(*func_ptr[])(int) = {
         fp_dhcp_tbl_stats,
+        fp_dhcp_offer_tbl_stats,
         fp_ssdp_tbl_stats,
         fp_mdns_tbl_stats
     };
@@ -296,6 +375,7 @@ static JSON_VAL_TPL_t *tpl_fp_tbl_stats_array_f(char *key, int ii)
 JSON_KEYVAL_TPL_t *fp_mk_json_tpl_f(char *key)
 {
     FP_TABLE_STATS_t *dhcp_stats = fp_dhcp_tbl_stats(FALSE);
+    FP_TABLE_STATS_t *dhcp_offer_stats = fp_dhcp_offer_tbl_stats(FALSE);
     FP_TABLE_STATS_t *mdns_stats = fp_mdns_tbl_stats(FALSE);
     FP_TABLE_STATS_t *ssdp_stats = fp_ssdp_tbl_stats(FALSE);
 
@@ -303,6 +383,7 @@ JSON_KEYVAL_TPL_t *fp_mk_json_tpl_f(char *key)
     // guarantee entries in the tables, but it means there might
     // have been attempts to add data and we should report stats)
     if(dhcp_stats->add_all == 0 &&
+       dhcp_offer_stats->add_all == 0 &&
        mdns_stats->add_all == 0 &&
        ssdp_stats->add_all == 0)
     {
@@ -319,6 +400,7 @@ JSON_KEYVAL_TPL_t *fp_mk_json_tpl_f(char *key)
 void fp_reset_tables(void)
 {
   fp_reset_dhcp_tables();
+  fp_reset_dhcp_offer_tables();
   fp_reset_mdns_tables();
   fp_reset_ssdp_tables();
 }
@@ -331,6 +413,11 @@ int fp_init(int level)
     if(level == INIT_LEVEL_FINGERPRINT) {
         // Initialize the DHCP fingerprinting
         if(fp_dhcp_init() != 0) {
+            return -1;
+        }
+
+        // Initialize the DHCP fingerprinting
+        if(fp_dhcp_offer_init() != 0) {
             return -1;
         }
 

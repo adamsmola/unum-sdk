@@ -50,6 +50,17 @@ struct _FP_DHCP {
 };
 typedef struct _FP_DHCP FP_DHCP_t;
 
+// DHCP offer fingerprinting info
+struct _FP_DHCP_OFFER {
+    unsigned char mac[6]; // MAC address of the device sending DHCP offer
+#define FP_DHCP_BYTES 240
+    unsigned char bytes[FP_DHCP_BYTES];
+    unsigned short blob_len; // Length of options data in the blob array
+#define FP_MAX_DHCP_OPTIONS 308
+    unsigned char blob[FP_MAX_DHCP_OPTIONS]; // DHCP options data
+};
+typedef struct _FP_DHCP_OFFER FP_DHCP_OFFER_t;
+
 // mDNS fingerprinting info
 struct _FP_MDNS {
     unsigned char mac[6]; // MAC address of the device sending mDNS request
